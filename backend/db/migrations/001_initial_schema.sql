@@ -210,9 +210,17 @@ CREATE TABLE faxes (
 );
 
 -- ============================================================
+-- CASES ← PEOPLE back-reference (deferred to break circular FK)
+-- cases must exist before people; people must exist before this ALTER
+-- ============================================================
+ALTER TABLE cases
+  ADD COLUMN person_id uuid REFERENCES people(id);
+
+-- ============================================================
 -- INDEXES
 -- ============================================================
-CREATE INDEX idx_people_case_id       ON people(case_id);
+CREATE INDEX idx_cases_person_id       ON cases(person_id);
+CREATE INDEX idx_people_case_id        ON people(case_id);
 CREATE INDEX idx_courts_case_id       ON courts(case_id);
 CREATE INDEX idx_events_case_id       ON events(case_id);
 CREATE INDEX idx_events_deadline_date ON events(deadline_date) WHERE deadline_date IS NOT NULL;

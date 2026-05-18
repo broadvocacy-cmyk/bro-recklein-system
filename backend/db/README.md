@@ -33,6 +33,7 @@ Or paste each file into the Supabase SQL editor and run.
 
 - All PKs are `uuid` — compatible with Supabase RLS row-level security policies.
 - `case_id` FK cascades on delete across all child tables.
+- **Single-person, multi-case**: `cases.person_id` links every case back to the same subject record in `people`. Because `people` references `cases` and `cases` references `people`, the back-reference is added via `ALTER TABLE` after both tables exist — the only safe way to resolve the circular FK in PostgreSQL.
 - `documents.source_system` tracks provenance (PACER, email, fax, manual, FOIA).
 - `documents.is_redacted` + `flags.requires_redaction` form the redaction workflow surface.
 - `flags` is the shared output bus for all agents — query by `severity` and `status` for the morning brief.
