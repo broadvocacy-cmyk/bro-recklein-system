@@ -1,0 +1,15 @@
+{
+  "name": "bro-recklein-system",
+  "version": "1.0.0",
+  "description": "Recklein Case Engine backend + frontend",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node backend/tests/e2e_test.js",
+    "start": "node backend/server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "@supabase/supabase-js": "^2.39.0"
+  }
+}
