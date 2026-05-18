@@ -1,3 +1,40 @@
 {
-  "routes": []
+  "system_name": "Recklein Case Engine",
+  "mode": "single_person_multi_case",
+  "primary_person_id": "TO_BE_FILLED_AFTER_DB_INIT",
+
+  "routing": {
+    "preprocessor": {
+      "handles": ["raw_text", "pdf_text", "email_text", "fax_text"],
+      "output": "normalized_text"
+    },
+    "flagging_agent": {
+      "handles": ["normalized_text"],
+      "output": "flags"
+    },
+    "defense_strategist": {
+      "handles": ["flags", "events", "documents"],
+      "output": "strategic_recommendations"
+    },
+    "judge_pattern": {
+      "handles": ["events", "documents"],
+      "output": "judge_behavior_flags"
+    },
+    "brady_monitor": {
+      "handles": ["documents", "events"],
+      "output": "brady_giglio_flags"
+    },
+    "case_researcher": {
+      "handles": ["legal_questions", "statutes", "precedent"],
+      "output": "legal_research"
+    },
+    "morning_brief": {
+      "handles": ["flags", "events", "documents"],
+      "output": "daily_summary"
+    },
+    "thought_partner_bridge": {
+      "handles": ["strategic_recommendations", "legal_research"],
+      "output": "reasoning_context"
+    }
+  }
 }

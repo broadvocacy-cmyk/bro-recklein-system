@@ -1,3 +1,30 @@
 {
-  "org": {}
+  "organization": "B.R.O. Advocacy",
+  "system_name": "Recklein Case Engine",
+  "case_scope": "single_person_multi_case",
+  "person_name": "John Recklein",
+  "states_involved": ["TX", "IL", "MO"],
+  "counties_involved": ["Palo Pinto", "St. Clair", "Madison", "St. Charles"],
+  "data_sources": [
+    "FOIA",
+    "PAC",
+    "Court PDFs",
+    "Jail Logs",
+    "Transport Logs",
+    "Emails",
+    "Faxes"
+  ],
+  "redaction_policy": {
+    "auto_flag_sensitive_data": true,
+    "sensitive_fields": [
+      "addresses",
+      "phone_numbers",
+      "minors",
+      "medical_info",
+      "victim_info",
+      "sealed_content",
+      "SSN",
+      "jail_ids"
+    ]
+  }
 }
