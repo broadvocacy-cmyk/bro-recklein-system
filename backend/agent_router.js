@@ -8,9 +8,12 @@ export async function routeToAgent(agentName, payload) {
     case 'flagging_agent':
       return await writeFlag(payload);
     case 'defense_strategist':
-      return { strategy: "Generated strategy", recommended_actions: [] };
     case 'morning_brief':
-      return { summary: "Generated morning brief" };
+    case 'thought_partner_bridge':
+    case 'brady_monitor':
+    case 'judge_pattern':
+    case 'case_researcher':
+      return null;
     default:
       throw new Error(`Unknown agent: ${agentName}`);
   }
