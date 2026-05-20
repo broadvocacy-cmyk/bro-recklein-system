@@ -10,6 +10,7 @@ import peopleHandler from '../frontend/api/people.js';
 import courtsHandler from '../frontend/api/courts.js';
 import searchHandler from '../frontend/api/search.js';
 import reportsHandler from '../frontend/api/reports.js';
+import notificationsHandler from '../frontend/api/notifications.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -36,7 +37,10 @@ app.post('/api/courts',          courtsHandler);
 app.patch('/api/courts',         courtsHandler);
 app.delete('/api/courts',        courtsHandler);
 app.get('/api/search',           searchHandler);
-app.get('/api/reports',          reportsHandler);
+app.get('/api/reports',              reportsHandler);
+app.get('/api/notifications',        notificationsHandler);
+app.post('/api/notifications',       notificationsHandler);
+app.patch('/api/notifications',      notificationsHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
