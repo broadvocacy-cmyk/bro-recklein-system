@@ -4,6 +4,7 @@ import eventsHandler from '../frontend/api/events.js';
 import flagsHandler from '../frontend/api/flags.js';
 import ingestHandler from '../frontend/api/ingest.js';
 import morningBriefHandler from '../frontend/api/morning_brief.js';
+import notesHandler from '../frontend/api/notes.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -16,6 +17,8 @@ app.get('/api/events',        eventsHandler);
 app.get('/api/flags',         flagsHandler);
 app.post('/api/ingest',       ingestHandler);
 app.get('/api/morning_brief', morningBriefHandler);
+app.get('/api/notes',         notesHandler);
+app.post('/api/notes',        notesHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
