@@ -13,6 +13,7 @@ import reportsHandler from '../frontend/api/reports.js';
 import notificationsHandler from '../frontend/api/notifications.js';
 import crossCaseHandler from '../frontend/api/cross_case.js';
 import actorProfilesHandler from '../frontend/api/actor_profiles.js';
+import exportsHandler from '../frontend/api/exports.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -45,6 +46,7 @@ app.post('/api/notifications',       notificationsHandler);
 app.patch('/api/notifications',      notificationsHandler);
 app.get('/api/cross_case',           crossCaseHandler);
 app.get('/api/actor_profiles',       actorProfilesHandler);
+app.get('/api/exports',              exportsHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
