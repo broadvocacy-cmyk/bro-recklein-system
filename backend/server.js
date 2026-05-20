@@ -6,6 +6,8 @@ import ingestHandler from '../frontend/api/ingest.js';
 import morningBriefHandler from '../frontend/api/morning_brief.js';
 import notesHandler from '../frontend/api/notes.js';
 import foiaRequestsHandler from '../frontend/api/foia_requests.js';
+import peopleHandler from '../frontend/api/people.js';
+import courtsHandler from '../frontend/api/courts.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -23,6 +25,14 @@ app.post('/api/notes',           notesHandler);
 app.get('/api/foia_requests',    foiaRequestsHandler);
 app.post('/api/foia_requests',   foiaRequestsHandler);
 app.patch('/api/foia_requests',  foiaRequestsHandler);
+app.get('/api/people',           peopleHandler);
+app.post('/api/people',          peopleHandler);
+app.patch('/api/people',         peopleHandler);
+app.delete('/api/people',        peopleHandler);
+app.get('/api/courts',           courtsHandler);
+app.post('/api/courts',          courtsHandler);
+app.patch('/api/courts',         courtsHandler);
+app.delete('/api/courts',        courtsHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
