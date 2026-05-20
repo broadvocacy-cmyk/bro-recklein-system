@@ -5,6 +5,7 @@ import flagsHandler from '../frontend/api/flags.js';
 import ingestHandler from '../frontend/api/ingest.js';
 import morningBriefHandler from '../frontend/api/morning_brief.js';
 import notesHandler from '../frontend/api/notes.js';
+import foiaRequestsHandler from '../frontend/api/foia_requests.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -17,8 +18,11 @@ app.get('/api/events',        eventsHandler);
 app.get('/api/flags',         flagsHandler);
 app.post('/api/ingest',       ingestHandler);
 app.get('/api/morning_brief', morningBriefHandler);
-app.get('/api/notes',         notesHandler);
-app.post('/api/notes',        notesHandler);
+app.get('/api/notes',            notesHandler);
+app.post('/api/notes',           notesHandler);
+app.get('/api/foia_requests',    foiaRequestsHandler);
+app.post('/api/foia_requests',   foiaRequestsHandler);
+app.patch('/api/foia_requests',  foiaRequestsHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
