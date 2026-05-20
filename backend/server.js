@@ -11,6 +11,7 @@ import courtsHandler from '../frontend/api/courts.js';
 import searchHandler from '../frontend/api/search.js';
 import reportsHandler from '../frontend/api/reports.js';
 import notificationsHandler from '../frontend/api/notifications.js';
+import crossCaseHandler from '../frontend/api/cross_case.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -41,6 +42,7 @@ app.get('/api/reports',              reportsHandler);
 app.get('/api/notifications',        notificationsHandler);
 app.post('/api/notifications',       notificationsHandler);
 app.patch('/api/notifications',      notificationsHandler);
+app.get('/api/cross_case',           crossCaseHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
