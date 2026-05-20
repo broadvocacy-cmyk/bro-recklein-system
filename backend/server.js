@@ -9,6 +9,7 @@ import foiaRequestsHandler from '../frontend/api/foia_requests.js';
 import peopleHandler from '../frontend/api/people.js';
 import courtsHandler from '../frontend/api/courts.js';
 import searchHandler from '../frontend/api/search.js';
+import reportsHandler from '../frontend/api/reports.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -35,6 +36,7 @@ app.post('/api/courts',          courtsHandler);
 app.patch('/api/courts',         courtsHandler);
 app.delete('/api/courts',        courtsHandler);
 app.get('/api/search',           searchHandler);
+app.get('/api/reports',          reportsHandler);
 
 app.post('/api/agent/:agentName', async (req, res) => {
   const { agentName } = req.params;
