@@ -21,6 +21,7 @@ import workflowsHandler from '../frontend/api/workflows.js';
 import researchHandler from '../frontend/api/research.js';
 import verificationHandler from '../frontend/api/verification.js';
 import defenseStackHandler from '../frontend/api/defense_stack.js';
+import scenarioHandler from '../frontend/api/scenario.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -116,6 +117,11 @@ app.post('/api/verification',    verificationHandler);
 
 app.get('/api/defense_stack',    defenseStackHandler);
 app.post('/api/defense_stack',   defenseStackHandler);
+
+// ── Scenario simulation ───────────────────────────────────────────────────────
+
+app.get('/api/scenario',         scenarioHandler);
+app.post('/api/scenario',        scenarioHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
