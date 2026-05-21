@@ -22,6 +22,7 @@ import researchHandler from '../frontend/api/research.js';
 import verificationHandler from '../frontend/api/verification.js';
 import defenseStackHandler from '../frontend/api/defense_stack.js';
 import scenarioHandler from '../frontend/api/scenario.js';
+import pressureMapHandler from '../frontend/api/pressure_map.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -122,6 +123,11 @@ app.post('/api/defense_stack',   defenseStackHandler);
 
 app.get('/api/scenario',         scenarioHandler);
 app.post('/api/scenario',        scenarioHandler);
+
+// ── Pressure map ──────────────────────────────────────────────────────────────
+
+app.get('/api/pressure_map',     pressureMapHandler);
+app.post('/api/pressure_map',    pressureMapHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
