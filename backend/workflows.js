@@ -4,6 +4,7 @@ import { ingest } from './ingestion/router.js';
 import { createNote } from './notes.js';
 import { generateMorningBrief } from './morning_brief.js';
 import { generateAll as generateNotifications, getPendingNotifications } from './notifications.js';
+import { lookupCaseLaw, lookupStatute } from './research_agent.js';
 
 // ── BRO domain constants ──────────────────────────────────────────────────────
 
@@ -131,14 +132,23 @@ export async function runFlagEscalation({ case_id, flag_ids }) {
   const flagPayload  = flags.map(f => ({ type: f.flag_type, violation: f.violation_type, severity: f.severity, title: f.title, description: f.description }));
   const eventPayload = (recentEvents ?? []).map(e => ({ type: e.event_type, title: e.title, status: e.status, date: e.event_date }));
 
-  // Stage: parallel intel — defense strategy + brady monitor
-  const [strategyResult, bradyResult] = await Promise.all([
+  // Derive case state for jurisdiction-scoped research
+  const { data: caseRow } = await supabase.from('cases').select('state').eq('id', case_id).single();
+  const caseState = caseRow?.state ?? null;
+
+  const violationTypes = [...new Set(flags.map(f => f.violation_type).filter(Boolean))];
+  const flagTypes      = [...new Set(flags.map(f => f.flag_type).filter(Boolean))];
+  const caseLawQuery   = `${flagTypes.join(' ')} ${violationTypes.join(' ')} criminal defense violation`.trim();
+
+  // Parallel: defense agents + external case-law research
+  const [strategyResult, bradyResult, caseLawResearch] = await Promise.all([
     executeAgent('defense_strategist', { case_id, flags: flagPayload, events: eventPayload }),
     executeAgent('brady_monitor', {
       case_id,
       flags:  flags.filter(f => f.flag_type === 'brady').map(f => ({ title: f.title, description: f.description })),
       events: eventPayload
-    })
+    }),
+    lookupCaseLaw(caseLawQuery, caseState).catch(e => ({ error: e.message })),
   ]);
 
   // Mark flags escalated
@@ -160,7 +170,10 @@ export async function runFlagEscalation({ case_id, flag_ids }) {
       jsonBlock(strategyResult),
       '',
       '## Brady/Giglio Analysis',
-      jsonBlock(bradyResult)
+      jsonBlock(bradyResult),
+      '',
+      '## External Case-Law Research',
+      jsonBlock(caseLawResearch)
     ].join('\n'),
     author: 'escalation_workflow'
   });
@@ -176,6 +189,7 @@ export async function runFlagEscalation({ case_id, flag_ids }) {
     escalated_ids:         idsToEscalate,
     strategy:              strategyResult,
     brady_analysis:        bradyResult,
+    case_law_research:     caseLawResearch,
     notifications_created: notifResult.created
   };
 }
@@ -334,23 +348,40 @@ export async function runMultiStateAnalysis({ person_id, case_ids }) {
   const warrantFlags = flags.filter(f => contains(flagText(f), 'warrant'));
   const extraditionFlags = flags.filter(f => contains(flagText(f), 'extradition'));
 
-  // ── 5. Cross-state research via case_researcher agent ─────────────────────
+  // ── 5. Cross-state research: agent + parallel statutory lookups ────────────
+  const activeStates   = [...new Set(cases.map(c => c.state).filter(s => ORG_STATES.includes(s)))];
   const conflictSummary = [
     detainerStates.length > 1 ? `Active conflicting detainers across ${detainerStates.join(', ')}.` : '',
     overlappingDates.length > 0 ? `${overlappingDates.length} overlapping court date${overlappingDates.length !== 1 ? 's' : ''} detected.` : '',
     warrantFlags.length > 0 ? `${warrantFlags.length} warrant flag${warrantFlags.length !== 1 ? 's' : ''} detected.` : ''
   ].filter(Boolean).join(' ');
 
-  const researchResult = await executeAgent('case_researcher', {
-    legal_questions: [
-      'What are the extradition obligations between TX, IL, and MO for a defendant with active multi-state holds?',
-      'How are conflicting detainers resolved when multiple states claim jurisdiction?',
-      'Does time spent held on an out-of-state detainer count toward speedy trial in the requesting state?'
-    ],
-    states:   ORG_STATES,
-    counties: ORG_COUNTIES,
-    context:  `B.R.O. Advocacy — Recklein matter. ${conflictSummary}`
-  });
+  // Parallel: case_researcher agent + speedy-trial statute lookups per active state
+  const speedyTrialStatutes = {
+    TX: 'Tex. Code Crim. Proc. Art. 32A.02',
+    IL: 'Ill. Sup. Ct. R. 103(b)',
+    MO: 'Mo. R. Crim. P. 33.01',
+  };
+
+  const [researchResult, ...statuteResults] = await Promise.all([
+    executeAgent('case_researcher', {
+      legal_questions: [
+        'What are the extradition obligations between TX, IL, and MO for a defendant with active multi-state holds?',
+        'How are conflicting detainers resolved when multiple states claim jurisdiction?',
+        'Does time spent held on an out-of-state detainer count toward speedy trial in the requesting state?'
+      ],
+      states:   ORG_STATES,
+      counties: ORG_COUNTIES,
+      context:  `B.R.O. Advocacy — Recklein matter. ${conflictSummary}`
+    }),
+    ...activeStates.map(state =>
+      lookupStatute(speedyTrialStatutes[state], state).catch(e => ({ state, error: e.message }))
+    ),
+  ]);
+
+  const statutesByState = Object.fromEntries(
+    activeStates.map((state, i) => [state, statuteResults[i]])
+  );
 
   return {
     workflow:                'multi_state',
@@ -366,6 +397,7 @@ export async function runMultiStateAnalysis({ person_id, case_ids }) {
     warrant_conflicts:       warrantFlags.map(f => ({ id: f.id, title: f.title, severity: f.severity, state: caseState(f.case_id) })),
     extradition_flags:       extraditionFlags.map(f => ({ id: f.id, title: f.title, severity: f.severity })),
     legal_research:          researchResult,
+    statutory_research:      statutesByState,
     cross_state_flag_total:  flags.filter(f => f.flag_type === 'inconsistency' || f.violation_type === 'constitutional').length
   };
 }
@@ -386,21 +418,29 @@ export async function runStrategyGeneration({ case_id }) {
   const docPayload   = docs.slice(0, 20).map(d => ({ type: d.doc_type, source: d.source_system, is_brady: d.is_brady, summary: d.summary }));
   const foiaPayload  = foia.map(r => ({ agency: r.agency, status: r.status, due_date: r.due_date, state: r.state }));
 
-  // Stage 1: parallel intel gathering (free-tier agents per token_rules.md)
-  const [bradyResult, judgeResult] = await Promise.all([
+  // Build case-law query from highest-severity flags
+  const topFlags     = openFlags.filter(f => ['critical', 'high'].includes(f.severity)).slice(0, 3);
+  const caseLawQuery = topFlags.length
+    ? topFlags.map(f => f.violation_type ?? f.flag_type).filter(Boolean).join(' ') + ' criminal defense case law'
+    : 'speedy trial Brady violation criminal defense case law TX IL MO';
+
+  // Stage 1: parallel intel — agents + external case-law research
+  const [bradyResult, judgeResult, externalResearch] = await Promise.all([
     executeAgent('brady_monitor', { case_id, documents: docPayload, events: eventPayload }),
-    executeAgent('judge_pattern',  { case_id, events: eventPayload, documents: docPayload })
+    executeAgent('judge_pattern',  { case_id, events: eventPayload, documents: docPayload }),
+    lookupCaseLaw(caseLawQuery, null).catch(e => ({ error: e.message })),
   ]);
 
-  // Stage 2: defense strategy synthesis (Claude Pro)
+  // Stage 2: defense strategy synthesis (Claude Pro) — informed by external research
   const strategyResult = await executeAgent('defense_strategist', {
     case_id,
-    flags:          flagPayload,
-    events:         eventPayload,
-    documents:      docPayload,
-    foia:           foiaPayload,
-    brady_analysis: bradyResult,
-    judge_patterns: judgeResult
+    flags:             flagPayload,
+    events:            eventPayload,
+    documents:         docPayload,
+    foia:              foiaPayload,
+    brady_analysis:    bradyResult,
+    judge_patterns:    judgeResult,
+    external_research: externalResearch,
   });
 
   // Stage 3: thought partner bridge — final reconciliation (Claude Pro)
@@ -427,6 +467,9 @@ export async function runStrategyGeneration({ case_id }) {
       `## Stage 1B: Judge Pattern Analysis`,
       jsonBlock(judgeResult),
       '',
+      `## Stage 1C: External Case-Law Research`,
+      jsonBlock(externalResearch),
+      '',
       `## Stage 2: Defense Strategy`,
       jsonBlock(strategyResult),
       '',
@@ -444,8 +487,9 @@ export async function runStrategyGeneration({ case_id }) {
     critical_flags: openFlags.filter(f => f.severity === 'critical').length,
     brady_flags:    openFlags.filter(f => f.flag_type === 'brady').length,
     stage_1: {
-      brady_analysis: bradyResult,
-      judge_patterns: judgeResult
+      brady_analysis:    bradyResult,
+      judge_patterns:    judgeResult,
+      external_research: externalResearch,
     },
     stage_2: {
       strategy: strategyResult

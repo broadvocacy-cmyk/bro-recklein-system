@@ -18,6 +18,7 @@ import crossCaseHandler from '../frontend/api/cross_case.js';
 import actorProfilesHandler from '../frontend/api/actor_profiles.js';
 import exportsHandler from '../frontend/api/exports.js';
 import workflowsHandler from '../frontend/api/workflows.js';
+import researchHandler from '../frontend/api/research.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -98,6 +99,11 @@ app.get('/api/exports',          exportsHandler);
 
 app.get('/api/workflows',        workflowsHandler);
 app.post('/api/workflows',       workflowsHandler);
+
+// ── External research ────────────────────────────────────────────────────────
+
+app.get('/api/research',         researchHandler);
+app.post('/api/research',        researchHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
