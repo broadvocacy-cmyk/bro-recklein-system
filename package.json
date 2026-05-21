@@ -1,15 +1,22 @@
 {
   "name": "bro-recklein-system",
   "version": "1.0.0",
-  "description": "Recklein Case Engine backend + frontend",
-  "main": "index.js",
+  "description": "Recklein Case Engine — B.R.O. Advocacy multi-state case management backend",
+  "main": "backend/server.js",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "test": "node backend/tests/e2e_test.js",
-    "start": "node backend/server.js"
+    "start":     "node -r dotenv/config backend/server.js",
+    "dev":       "node -r dotenv/config --watch backend/server.js",
+    "test":      "node -r dotenv/config backend/tests/e2e_test.js",
+    "check":     "node -r dotenv/config backend/tests/connectivity_test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.18.0"
   }
 }
