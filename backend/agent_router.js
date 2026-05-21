@@ -13,6 +13,17 @@ export async function routeToAgent(agentName, payload) {
     case 'brady_monitor':
     case 'judge_pattern':
     case 'case_researcher':
+    // Module M–U agents — dedicated endpoints handle full pipelines;
+    // falling through to generic Claude call with system prompt for direct queries
+    case 'research_agent':
+    case 'verification_agent':
+    case 'defense_stack_agent':
+    case 'scenario_agent':
+    case 'pressure_map_agent':
+    case 'pattern_engine_agent':
+    case 'oversight_agent':
+    case 'watchdog_agent':
+    case 'dashboard_agent':
       return null;
     default:
       throw new Error(`Unknown agent: ${agentName}`);
