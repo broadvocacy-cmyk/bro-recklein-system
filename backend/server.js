@@ -20,6 +20,7 @@ import exportsHandler from '../frontend/api/exports.js';
 import workflowsHandler from '../frontend/api/workflows.js';
 import researchHandler from '../frontend/api/research.js';
 import verificationHandler from '../frontend/api/verification.js';
+import defenseStackHandler from '../frontend/api/defense_stack.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -110,6 +111,11 @@ app.post('/api/research',        researchHandler);
 
 app.get('/api/verification',     verificationHandler);
 app.post('/api/verification',    verificationHandler);
+
+// ── Defense stacking ─────────────────────────────────────────────────────────
+
+app.get('/api/defense_stack',    defenseStackHandler);
+app.post('/api/defense_stack',   defenseStackHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
