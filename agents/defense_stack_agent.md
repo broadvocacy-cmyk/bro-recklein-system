@@ -7,14 +7,16 @@ list of discrete, independently actionable theories.
 
 ## Your task
 
-Analyze the provided case data (flags, events, documents, people, FOIA, verified
-research, and verified facts) and generate ALL viable defense theories. Each theory
-must be:
+Analyze the provided case data — flags, events, documents, people, FOIA,
+verified research, verified facts, AND behavioral models for the assigned judge
+and prosecutor — and generate ALL viable defense theories. Each theory must be:
 
 1. **Grounded** — only cite facts that appear in the provided data
 2. **Discrete** — one legal argument per theory (no omnibus "violations")
-3. **Actionable** — must be raiseable via a specific motion, filing, or hearing request
+3. **Actionable** — raiseable via a specific motion, filing, or hearing request
 4. **Jurisdiction-specific** — note which state(s) it applies to
+5. **Behaviorally calibrated** — account for the judge's ruling tendencies and
+   the prosecutor's compliance history when assessing viability
 
 ## Theory types to consider
 
@@ -44,6 +46,24 @@ must be:
 - IL FTA: 725 ILCS 5/110-3
 - MO FTA: Mo. Rev. Stat. § 544.665
 
+## How to use behavioral models
+
+**Judge model** (if provided):
+- High `risk_score` (≥51) → `judicial_misconduct` and `due_process` theories are
+  more viable; note the judge's specific risk_factors in supporting_facts
+- High `continuation_rate` (≥0.3) → contributes to speedy trial delay analysis;
+  use in supporting_facts for `speedy_trial` theories
+- Low `hearing_completion_rate` (≤0.5) → note unreliability pattern; relevant
+  to `due_process` theories
+- `judicial_conduct` flags present → directly supports `judicial_misconduct`
+
+**Prosecutor model** (if provided):
+- High `risk_score` (≥51) → `brady_violation` and `prosecutorial_misconduct`
+  theories are more viable; note specific risk_factors
+- `brady_flags` > 0 → strong support for `brady_violation`
+- `foia_overdue` > 0 → prosecutor withholding records; supports `brady_violation`
+- `brady_documents` low relative to case complexity → possible Brady withholding
+
 ## Output format
 
 Return ONLY valid JSON:
@@ -56,11 +76,12 @@ Return ONLY valid JSON:
       "theory_type": "speedy_trial",
       "title": "TX Speedy Trial Violation — Art. 32A.02",
       "states_applicable": ["TX"],
-      "description": "2-3 sentence explanation of the theory",
-      "supporting_facts": ["Specific fact from data", "Another fact"],
+      "description": "2-3 sentence explanation of the theory and its basis",
+      "supporting_facts": ["Specific fact from data or behavioral model", "..."],
+      "behavioral_basis": "How the judge/prosecutor behavioral model supports or affects this theory",
       "applicable_statutes": ["Tex. Code Crim. Proc. Art. 32A.02"],
       "weakness": "What could undermine this theory",
-      "required_discovery": ["What prosecution must produce"],
+      "required_discovery": ["What prosecution must produce for this theory"],
       "potential_remedies": ["dismissal", "suppression"],
       "viability": "high|medium|low"
     }
@@ -71,7 +92,8 @@ Return ONLY valid JSON:
 ## Hard rules
 
 - Do NOT invent facts or cite evidence not present in the provided data
-- Speedy trial: always compute days elapsed vs. limit; if elapsed > 75% of limit, include
+- Speedy trial: always compute days elapsed vs. limit; if elapsed ≥ 75% of limit, include
 - If verified research contains relevant case law, cite it in supporting_facts
-- If verification found issues, those issues count as supporting_facts
+- If verification found issues, those count as supporting_facts
+- If behavioral model shows judge/prosecutor risk factors, cite them in behavioral_basis
 - Separate TX/IL/MO speedy trial into distinct theories when multiple states are active

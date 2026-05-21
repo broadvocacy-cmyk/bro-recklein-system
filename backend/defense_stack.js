@@ -1,6 +1,7 @@
 import { anthropic } from './anthropic_client.js';
 import { supabase } from './supabase_client.js';
 import { createNote } from './notes.js';
+import { judgeProfile, prosecutorProfile } from './actor_profiles.js';
 import { lookupCaseLaw } from './research_agent.js';
 import { verifyStrategyOutput } from './verification_agent.js';
 import { readFileSync } from 'fs';
@@ -58,7 +59,7 @@ async function fetchStackContext(case_id) {
       .select('id, title, doc_type, source_system, is_brady, summary, filed_date')
       .eq('case_id', case_id).order('created_at', { ascending: false }).limit(20),
     supabase.from('foia_requests').select('*').eq('case_id', case_id),
-    supabase.from('people').select('full_name, role, organization').eq('case_id', case_id),
+    supabase.from('people').select('id, full_name, role, organization').eq('case_id', case_id),
     supabase.from('notes')
       .select('title, body')
       .eq('case_id', case_id)
@@ -85,11 +86,66 @@ async function fetchStackContext(case_id) {
   };
 }
 
+// ── Actor behavioral model fetch ──────────────────────────────────────────────
+
+const PROSECUTOR_ROLES = new Set(['prosecutor', 'district_attorney', 'state_attorney', 'ada', 'assistant_district_attorney']);
+
+async function fetchActorModels(people) {
+  const judge      = people.find(p => p.role === 'judge');
+  const prosecutor = people.find(p => PROSECUTOR_ROLES.has(p.role?.toLowerCase()));
+
+  const [judgeModel, prosecutorModel] = await Promise.all([
+    judge      ? judgeProfile(judge.id).catch(() => null)           : Promise.resolve(null),
+    prosecutor ? prosecutorProfile(prosecutor.id).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  return {
+    judge:      (judgeModel && !judgeModel.error)
+      ? { name: judge.full_name, ...judgeModel }
+      : null,
+    prosecutor: (prosecutorModel && !prosecutorModel.error)
+      ? { name: prosecutor.full_name, ...prosecutorModel }
+      : null,
+  };
+}
+
 // ── Stage 1: Theory generation ───────────────────────────────────────────────
 
-async function generateTheories(ctx) {
+async function generateTheories(ctx, actorModels) {
   const { caseRow, flags, events, docs, foia, people, researchNotes, verificationNotes } = ctx;
   const systemPrompt = loadAgentPrompt();
+
+  const behavioralModels = {};
+
+  if (actorModels?.judge) {
+    const j = actorModels.judge;
+    behavioralModels.judge = {
+      name:                    j.name ?? j.full_name,
+      risk_score:              j.risk_score,
+      risk_level:              j.risk_level,
+      risk_factors:            j.risk_factors ?? [],
+      continuation_rate:       j.delay_patterns?.continuation_rate ?? null,
+      missed_events:           j.delay_patterns?.missed_events ?? null,
+      hearing_completion_rate: j.motion_tendencies?.hearing_completion_rate ?? null,
+      hearing_miss_rate:       j.motion_tendencies?.hearing_miss_rate ?? null,
+      judicial_conduct_flags:  j.behavior_profile?.by_flag_type?.judicial_conduct ?? 0,
+    };
+  }
+
+  if (actorModels?.prosecutor) {
+    const p = actorModels.prosecutor;
+    behavioralModels.prosecutor = {
+      name:             p.name ?? p.full_name,
+      risk_score:       p.risk_score,
+      risk_level:       p.risk_level,
+      risk_factors:     p.risk_factors ?? [],
+      brady_flags:      p.behavior_profile?.by_flag_type?.brady ?? 0,
+      brady_documents:  p.filing_patterns?.brady_documents ?? 0,
+      foia_overdue:     p.filing_patterns?.foia_overdue ?? 0,
+      foia_denied:      p.filing_patterns?.foia_denied ?? 0,
+      foia_response_rate: p.filing_patterns?.foia_response_rate ?? null,
+    };
+  }
 
   const payload = {
     case: {
@@ -102,7 +158,7 @@ async function generateTheories(ctx) {
       days_since_filing: caseRow.filed_date
         ? Math.floor((Date.now() - new Date(caseRow.filed_date).getTime()) / 86_400_000)
         : null,
-      speedy_limit: SPEEDY_LIMITS[caseRow.state]?.days ?? null,
+      speedy_limit:   SPEEDY_LIMITS[caseRow.state]?.days ?? null,
       speedy_statute: SPEEDY_LIMITS[caseRow.state]?.statute ?? null,
     },
     flags: flags.map(f => ({
@@ -120,8 +176,9 @@ async function generateTheories(ctx) {
     })),
     foia: foia.map(r => ({ agency: r.agency, state: r.state, status: r.status, due_date: r.due_date })),
     people: people.map(p => ({ name: p.full_name, role: p.role, org: p.organization })),
-    verified_research:  researchNotes.map(n => ({ title: n.title, excerpt: n.body?.slice(0, 500) })),
-    verified_facts:     verificationNotes.map(n => ({ title: n.title, excerpt: n.body?.slice(0, 500) })),
+    verified_research: researchNotes.map(n => ({ title: n.title, excerpt: n.body?.slice(0, 500) })),
+    verified_facts:    verificationNotes.map(n => ({ title: n.title, excerpt: n.body?.slice(0, 500) })),
+    behavioral_models: Object.keys(behavioralModels).length ? behavioralModels : null,
   };
 
   const resp = await anthropic.messages.create({
@@ -138,11 +195,20 @@ async function generateTheories(ctx) {
 
 // ── Stage 2: Ranking (pure JS) ────────────────────────────────────────────────
 
-function rankTheories(theories, { flags, caseRow }) {
-  const filedMs   = caseRow.filed_date ? new Date(caseRow.filed_date).getTime() : null;
-  const daysSince = filedMs ? Math.floor((Date.now() - filedMs) / 86_400_000) : 0;
-  const limit     = SPEEDY_LIMITS[caseRow.state]?.days ?? 180;
+function rankTheories(theories, { flags, caseRow, actorModels }) {
+  const filedMs    = caseRow.filed_date ? new Date(caseRow.filed_date).getTime() : null;
+  const daysSince  = filedMs ? Math.floor((Date.now() - filedMs) / 86_400_000) : 0;
+  const limit      = SPEEDY_LIMITS[caseRow.state]?.days ?? 180;
   const pctElapsed = daysSince / limit;
+
+  // Behavioral model values for scoring adjustments
+  const judgeRisk      = actorModels?.judge?.risk_score ?? 0;
+  const contRate       = actorModels?.judge?.delay_patterns?.continuation_rate ?? 0;
+  const hcrRate        = actorModels?.judge?.motion_tendencies?.hearing_completion_rate ?? 1;
+  const judicialFlags  = actorModels?.judge?.behavior_profile?.by_flag_type?.judicial_conduct ?? 0;
+  const prosecutorRisk = actorModels?.prosecutor?.risk_score ?? 0;
+  const foiaOverdue    = actorModels?.prosecutor?.filing_patterns?.foia_overdue ?? 0;
+  const bradyFlags     = actorModels?.prosecutor?.behavior_profile?.by_flag_type?.brady ?? 0;
 
   return theories.map(t => {
     let score = 0;
@@ -156,10 +222,37 @@ function rankTheories(theories, { flags, caseRow }) {
     // Urgency bonus for speedy trial (0–30)
     if (t.theory_type === 'speedy_trial') {
       score += pctElapsed >= 1.0 ? 30 : pctElapsed >= 0.75 ? 22 : pctElapsed >= 0.5 ? 12 : 5;
+      // Continuation rate compounds speedy trial urgency
+      if (contRate >= 0.3) score += 8;
     }
 
-    // Brady always high leverage (0–15)
-    if (t.theory_type === 'brady_violation') score += 15;
+    // Brady always high leverage (0–15), boosted by behavioral data
+    if (t.theory_type === 'brady_violation') {
+      score += 15;
+      if (prosecutorRisk >= 51) score += 15;
+      else if (prosecutorRisk >= 26) score += 8;
+      if (foiaOverdue > 0) score += Math.min(foiaOverdue * 3, 12);
+      if (bradyFlags > 0) score += Math.min(bradyFlags * 5, 10);
+    }
+
+    // Prosecutorial misconduct boosted by high prosecutor risk
+    if (t.theory_type === 'prosecutorial_misconduct') {
+      if (prosecutorRisk >= 51) score += 10;
+      else if (prosecutorRisk >= 26) score += 5;
+    }
+
+    // Judicial misconduct and due_process boosted by judge behavioral model
+    if (t.theory_type === 'judicial_misconduct') {
+      if (judgeRisk >= 51) score += 15;
+      else if (judgeRisk >= 26) score += 8;
+      if (judicialFlags > 0) score += Math.min(judicialFlags * 5, 10);
+    }
+
+    if (t.theory_type === 'due_process') {
+      if (judgeRisk >= 51) score += 8;
+      if (contRate >= 0.3) score += 6;
+      if (hcrRate <= 0.5) score += 5;
+    }
 
     // Multi-state issues carry extra weight (0–10)
     if (['jurisdiction_conflict', 'detainer_conflict'].includes(t.theory_type)) score += 10;
@@ -168,9 +261,9 @@ function rankTheories(theories, { flags, caseRow }) {
     const matchedFlags = flags.filter(f =>
       ['open', 'escalated'].includes(f.status) && (
         f.flag_type === t.theory_type ||
-        (t.theory_type === 'brady_violation'   && f.flag_type === 'brady') ||
-        (t.theory_type === 'speedy_trial'      && f.flag_type === 'deadline') ||
-        (t.theory_type === 'fta_wrongful'      && contains(f.title ?? '', 'fta')) ||
+        (t.theory_type === 'brady_violation'     && f.flag_type === 'brady') ||
+        (t.theory_type === 'speedy_trial'        && f.flag_type === 'deadline') ||
+        (t.theory_type === 'fta_wrongful'        && contains(f.title ?? '', 'fta')) ||
         (t.theory_type === 'judicial_misconduct' && f.flag_type === 'judicial_conduct')
       )
     );
@@ -178,9 +271,9 @@ function rankTheories(theories, { flags, caseRow }) {
 
     return {
       ...t,
-      strength_score:   Math.min(Math.round(score), 100),
-      matched_flags:    matchedFlags.length,
-      base_sequence:    SEQUENCE_PRIORITY[t.theory_type] ?? 50,
+      strength_score: Math.min(Math.round(score), 100),
+      matched_flags:  matchedFlags.length,
+      base_sequence:  SEQUENCE_PRIORITY[t.theory_type] ?? 50,
     };
   }).sort((a, b) => b.strength_score - a.strength_score);
 }
@@ -189,12 +282,30 @@ function contains(str, kw) { return (str ?? '').toLowerCase().includes(kw); }
 
 // ── Stage 3: Stack plan — sequencing, leverage, timing ───────────────────────
 
-async function buildStackPlan(ranked, { caseRow, events, foia }) {
+async function buildStackPlan(ranked, { caseRow, events, foia, actorModels }) {
   const missedHrgs  = events.filter(e => e.status === 'missed').length;
   const overdueFoia = foia.filter(r => ['sent', 'acknowledged'].includes(r.status)).length;
   const daysSince   = caseRow.filed_date
     ? Math.floor((Date.now() - new Date(caseRow.filed_date).getTime()) / 86_400_000)
     : null;
+
+  const behavioralContext = {};
+  if (actorModels?.judge) {
+    behavioralContext.judge = {
+      name:            actorModels.judge.name ?? actorModels.judge.full_name,
+      risk_level:      actorModels.judge.risk_level,
+      risk_score:      actorModels.judge.risk_score,
+      continuation_rate: actorModels.judge.delay_patterns?.continuation_rate ?? null,
+    };
+  }
+  if (actorModels?.prosecutor) {
+    behavioralContext.prosecutor = {
+      name:         actorModels.prosecutor.name ?? actorModels.prosecutor.full_name,
+      risk_level:   actorModels.prosecutor.risk_level,
+      risk_score:   actorModels.prosecutor.risk_score,
+      foia_overdue: actorModels.prosecutor.filing_patterns?.foia_overdue ?? 0,
+    };
+  }
 
   const system = `You are the Defense Stack Engine sequencing attorney for B.R.O. Advocacy.
 Given ranked defense theories, produce the complete stacking plan for each theory.
@@ -234,7 +345,10 @@ Sequencing rules:
 4. FTA wrongful fourth — undercuts any bond revocation or new warrants
 5. Suppression fifth — needs Brady disclosure to be complete first
 6. Evidentiary/due process sixth — pretrial motions, preserve for appeal
-7. Misconduct/ineffective counsel last — primarily appeal preservation`;
+7. Misconduct/ineffective counsel last — primarily appeal preservation
+
+If behavioral models show a high-risk judge (risk_score >= 51), prioritize judicial_misconduct and due_process theories higher and note recusal or disqualification options.
+If behavioral models show a high-risk prosecutor (risk_score >= 51), front-load Brady and discovery motions to maximize disclosure pressure.`;
 
   const resp = await anthropic.messages.create({
     model:      MODEL_PRO,
@@ -243,14 +357,15 @@ Sequencing rules:
     messages: [{
       role: 'user',
       content: JSON.stringify({
-        case_state:      caseRow.state,
-        filed_date:      caseRow.filed_date,
+        case_state:        caseRow.state,
+        filed_date:        caseRow.filed_date,
         days_since_filing: daysSince,
-        speedy_limit:    SPEEDY_LIMITS[caseRow.state]?.days ?? null,
-        case_status:     caseRow.status,
-        missed_hearings: missedHrgs,
-        overdue_foia:    overdueFoia,
-        ranked_theories: ranked.map(t => ({
+        speedy_limit:      SPEEDY_LIMITS[caseRow.state]?.days ?? null,
+        case_status:       caseRow.status,
+        missed_hearings:   missedHrgs,
+        overdue_foia:      overdueFoia,
+        behavioral_models: Object.keys(behavioralContext).length ? behavioralContext : null,
+        ranked_theories:   ranked.map(t => ({
           theory_id:           t.theory_id,
           theory_type:         t.theory_type,
           title:               t.title,
@@ -314,15 +429,43 @@ function mergeStack(ranked, stackPlan, research) {
     .sort((a, b) => (a.sequence_order ?? 99) - (b.sequence_order ?? 99));
 }
 
-function buildStackNote(stacked, verification, caseRow) {
-  const date    = new Date().toLocaleDateString('en-US');
-  const state   = caseRow.state ?? 'Multi-state';
-  const lines   = [
+function buildStackNote(stacked, verification, caseRow, actorModels) {
+  const date  = new Date().toLocaleDateString('en-US');
+  const state = caseRow.state ?? 'Multi-state';
+  const lines = [
     `# Defense Stack Plan — ${state} — ${date}`,
     `**Case:** ${caseRow.title ?? caseRow.id ?? 'Unknown'} | **Status:** ${caseRow.status ?? '?'}`,
     `**Total theories:** ${stacked.length}`,
     '',
   ];
+
+  // Behavioral model summary block
+  if (actorModels?.judge || actorModels?.prosecutor) {
+    lines.push('## Behavioral Models');
+    if (actorModels.judge) {
+      const j = actorModels.judge;
+      lines.push(
+        `**Judge:** ${j.name ?? j.full_name ?? 'Unknown'} — Risk: ${j.risk_score ?? '?'}/100 (${j.risk_level ?? '?'})`,
+      );
+      if (j.risk_factors?.length) {
+        j.risk_factors.slice(0, 4).forEach(f => lines.push(`  - ${f}`));
+      }
+      const cr = j.delay_patterns?.continuation_rate;
+      if (cr != null) lines.push(`  - Continuation rate: ${(cr * 100).toFixed(0)}%`);
+    }
+    if (actorModels.prosecutor) {
+      const p = actorModels.prosecutor;
+      lines.push(
+        `**Prosecutor:** ${p.name ?? p.full_name ?? 'Unknown'} — Risk: ${p.risk_score ?? '?'}/100 (${p.risk_level ?? '?'})`,
+      );
+      if (p.risk_factors?.length) {
+        p.risk_factors.slice(0, 4).forEach(f => lines.push(`  - ${f}`));
+      }
+      const fo = p.filing_patterns?.foia_overdue;
+      if (fo) lines.push(`  - Overdue FOIA requests: ${fo}`);
+    }
+    lines.push('');
+  }
 
   for (const t of stacked) {
     const urgency = t.timing_window?.urgency?.toUpperCase() ?? '?';
@@ -340,6 +483,10 @@ function buildStackNote(stacked, verification, caseRow) {
       lines.push('**Supporting facts:**');
       t.supporting_facts.forEach(f => lines.push(`- ${f}`));
       lines.push('');
+    }
+
+    if (t.behavioral_basis) {
+      lines.push(`**Behavioral basis:** ${t.behavioral_basis}`);
     }
 
     if (t.applicable_statutes?.length) {
@@ -387,21 +534,29 @@ function buildStackNote(stacked, verification, caseRow) {
 
 export async function runDefenseStack({ case_id }) {
   const ctx = await fetchStackContext(case_id);
-  const { caseRow, flags, events, foia } = ctx;
+  const { caseRow, flags, events, foia, people } = ctx;
 
-  // Stage 1: Theory generation
-  const theories = await generateTheories(ctx);
+  // Fetch behavioral models for judge and prosecutor in parallel with theory generation
+  const [actorModels, theories] = await Promise.all([
+    fetchActorModels(people),
+    generateTheories(ctx, null), // first pass without models to avoid serial dependency
+  ]);
 
-  if (!theories.length) {
+  // Re-generate theories WITH behavioral models if models are available
+  const finalTheories = (actorModels.judge || actorModels.prosecutor)
+    ? await generateTheories(ctx, actorModels)
+    : theories;
+
+  if (!finalTheories.length) {
     return { error: 'No theories generated — insufficient case data or flags' };
   }
 
-  // Stage 2: Rank (in-JS, no API call)
-  const ranked = rankTheories(theories, { flags, caseRow });
+  // Stage 2: Rank (in-JS, no API call) — includes behavioral scoring
+  const ranked = rankTheories(finalTheories, { flags, caseRow, actorModels });
 
-  // Stage 3 + 4 parallel: stack plan + research top theories
+  // Stage 3 + 4 + 5 parallel: stack plan + research top theories + verification
   const [stackPlan, research, verification] = await Promise.all([
-    buildStackPlan(ranked, { caseRow, events, foia }),
+    buildStackPlan(ranked, { caseRow, events, foia, actorModels }),
     researchTopTheories(ranked, caseRow.state ?? null),
     verifyTopTheories(case_id, ranked),
   ]);
@@ -418,22 +573,23 @@ export async function runDefenseStack({ case_id }) {
     case_id,
     note_type: 'strategy',
     title:     `Defense Stack — ${stacked.length} theories [${caseRow.state ?? 'multi'}] — ${new Date().toLocaleDateString('en-US')}`,
-    body:      buildStackNote(stacked, verification, caseRow),
+    body:      buildStackNote(stacked, verification, caseRow, actorModels),
     author:    'defense_stack',
   });
 
   return {
-    workflow:              'defense_stack',
+    workflow:         'defense_stack',
     case_id,
-    generated_at:          new Date().toISOString(),
-    case_state:            caseRow.state,
-    total_theories:        stacked.length,
-    theories_by_type:      Object.fromEntries(
+    generated_at:     new Date().toISOString(),
+    case_state:       caseRow.state,
+    total_theories:   stacked.length,
+    theories_by_type: Object.fromEntries(
       [...new Set(stacked.map(t => t.theory_type))].map(type => [
         type, stacked.filter(t => t.theory_type === type).length
       ])
     ),
-    stacked_theories:      stacked,
+    stacked_theories: stacked,
+    actor_models:     actorModels,
     verification,
     summary: {
       top_filing:          stacked[0] ? `[${stacked[0].sequence_order}] ${stacked[0].title}` : null,
@@ -442,6 +598,8 @@ export async function runDefenseStack({ case_id }) {
       dismissal_targets:   dismissHigh.map(t => t.title),
       total_synergies:     stacked.reduce((n, t) => n + (t.stacking_synergies?.length ?? 0), 0),
       theories_researched: Object.keys(research).length,
+      judge_risk:          actorModels.judge  ? { name: actorModels.judge.name,  risk_score: actorModels.judge.risk_score,  risk_level: actorModels.judge.risk_level }  : null,
+      prosecutor_risk:     actorModels.prosecutor ? { name: actorModels.prosecutor.name, risk_score: actorModels.prosecutor.risk_score, risk_level: actorModels.prosecutor.risk_level } : null,
     },
   };
 }
@@ -458,14 +616,18 @@ export async function runMultiCaseStack({ person_id, case_ids }) {
     .filter(r => !r.error && r.stacked_theories?.length)
     .flatMap(r => r.stacked_theories.map(t => ({ ...t, source_case_id: r.case_id, source_state: r.case_state })));
 
-  const unified = allTheories
-    .sort((a, b) =>
-      (a.sequence_order ?? 99) - (b.sequence_order ?? 99) ||
-      b.strength_score - a.strength_score
-    );
+  const unified = allTheories.sort((a, b) =>
+    (a.sequence_order ?? 99) - (b.sequence_order ?? 99) ||
+    b.strength_score - a.strength_score
+  );
 
   const critical   = unified.filter(t => t.timing_window?.urgency === 'critical');
   const highLev    = unified.filter(t => t.leverage_map?.dismissal_potential === 'high');
+
+  // Aggregate actor models from all cases (deduplicate by name)
+  const actorModelsByCase = caseResults
+    .filter(r => !r.error && r.actor_models)
+    .map(r => ({ case_id: r.case_id, case_state: r.case_state, actor_models: r.actor_models }));
 
   return {
     workflow:        'multi_case_defense_stack',
@@ -474,6 +636,7 @@ export async function runMultiCaseStack({ person_id, case_ids }) {
     generated_at:    new Date().toISOString(),
     per_case:        caseResults,
     unified_stack:   unified,
+    actor_models_by_case: actorModelsByCase,
     summary: {
       total_theories:    unified.length,
       critical_urgency:  critical.length,
