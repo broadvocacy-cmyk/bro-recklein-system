@@ -26,6 +26,7 @@ import pressureMapHandler from '../frontend/api/pressure_map.js';
 import patternEngineHandler from '../frontend/api/pattern_engine.js';
 import oversightHandler from '../frontend/api/oversight.js';
 import watchdogHandler from '../frontend/api/watchdog.js';
+import dashboardHandler from '../frontend/api/dashboard.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -146,6 +147,11 @@ app.post('/api/oversight',       oversightHandler);
 
 app.get('/api/watchdog',         watchdogHandler);
 app.post('/api/watchdog',        watchdogHandler);
+
+// ── Dashboard & intelligence hub ─────────────────────────────────────────────
+
+app.get('/api/dashboard',        dashboardHandler);
+app.post('/api/dashboard',       dashboardHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
