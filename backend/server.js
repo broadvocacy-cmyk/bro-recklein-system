@@ -25,6 +25,7 @@ import scenarioHandler from '../frontend/api/scenario.js';
 import pressureMapHandler from '../frontend/api/pressure_map.js';
 import patternEngineHandler from '../frontend/api/pattern_engine.js';
 import oversightHandler from '../frontend/api/oversight.js';
+import watchdogHandler from '../frontend/api/watchdog.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -140,6 +141,11 @@ app.post('/api/pattern_engine',  patternEngineHandler);
 
 app.get('/api/oversight',        oversightHandler);
 app.post('/api/oversight',       oversightHandler);
+
+// ── Alerts & watchdog ────────────────────────────────────────────────────────
+
+app.get('/api/watchdog',         watchdogHandler);
+app.post('/api/watchdog',        watchdogHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
