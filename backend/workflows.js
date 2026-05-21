@@ -5,6 +5,7 @@ import { createNote } from './notes.js';
 import { generateMorningBrief } from './morning_brief.js';
 import { generateAll as generateNotifications, getPendingNotifications } from './notifications.js';
 import { lookupCaseLaw, lookupStatute } from './research_agent.js';
+import { verifyStrategyOutput } from './verification_agent.js';
 
 // ── BRO domain constants ──────────────────────────────────────────────────────
 
@@ -403,10 +404,11 @@ export async function runMultiStateAnalysis({ person_id, case_ids }) {
 }
 
 // ── 5. STRATEGY GENERATION WORKFLOW ──────────────────────────────────────────
-// Four-stage agent pipeline:
-//   Stage 1 (parallel): brady_monitor + judge_pattern
+// Five-stage agent pipeline:
+//   Stage 1 (parallel): brady_monitor + judge_pattern + external case-law research
 //   Stage 2:            defense_strategist (consumes stage 1 output)
 //   Stage 3:            thought_partner_bridge (final synthesis)
+//   Stage 4:            verification_agent (citations, timeline, factual consistency)
 // Stores full output as a strategy note.
 
 export async function runStrategyGeneration({ case_id }) {
@@ -456,6 +458,10 @@ export async function runStrategyGeneration({ case_id }) {
     foia_summary:              { total: foia.length, overdue: foia.filter(r => r.status === 'overdue').length }
   });
 
+  // Stage 4: Verification — validate citations, timeline, and factual consistency
+  const verificationResult = await verifyStrategyOutput({ case_id, strategy: synthesisResult })
+    .catch(e => ({ verdict: 'error', error: e.message }));
+
   await createNote({
     case_id,
     note_type: 'strategy',
@@ -474,7 +480,10 @@ export async function runStrategyGeneration({ case_id }) {
       jsonBlock(strategyResult),
       '',
       `## Stage 3: Thought Partner Synthesis`,
-      jsonBlock(synthesisResult)
+      jsonBlock(synthesisResult),
+      '',
+      `## Stage 4: Verification`,
+      jsonBlock(verificationResult)
     ].join('\n'),
     author: 'strategy_workflow'
   });
@@ -496,6 +505,9 @@ export async function runStrategyGeneration({ case_id }) {
     },
     stage_3: {
       synthesis: synthesisResult
+    },
+    stage_4: {
+      verification: verificationResult
     }
   };
 }

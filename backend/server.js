@@ -19,6 +19,7 @@ import actorProfilesHandler from '../frontend/api/actor_profiles.js';
 import exportsHandler from '../frontend/api/exports.js';
 import workflowsHandler from '../frontend/api/workflows.js';
 import researchHandler from '../frontend/api/research.js';
+import verificationHandler from '../frontend/api/verification.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -104,6 +105,11 @@ app.post('/api/workflows',       workflowsHandler);
 
 app.get('/api/research',         researchHandler);
 app.post('/api/research',        researchHandler);
+
+// ── Verification ─────────────────────────────────────────────────────────────
+
+app.get('/api/verification',     verificationHandler);
+app.post('/api/verification',    verificationHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
