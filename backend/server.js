@@ -23,6 +23,7 @@ import verificationHandler from '../frontend/api/verification.js';
 import defenseStackHandler from '../frontend/api/defense_stack.js';
 import scenarioHandler from '../frontend/api/scenario.js';
 import pressureMapHandler from '../frontend/api/pressure_map.js';
+import patternEngineHandler from '../frontend/api/pattern_engine.js';
 import { executeAgent } from './agent_executor.js';
 
 const app = express();
@@ -128,6 +129,11 @@ app.post('/api/scenario',        scenarioHandler);
 
 app.get('/api/pressure_map',     pressureMapHandler);
 app.post('/api/pressure_map',    pressureMapHandler);
+
+// ── Multi-case pattern engine ─────────────────────────────────────────────────
+
+app.get('/api/pattern_engine',   patternEngineHandler);
+app.post('/api/pattern_engine',  patternEngineHandler);
 
 // ── Agent direct-call ───────────────────────────────────────────────────────
 
